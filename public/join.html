@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join Quiz</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Join Quiz</h1>
+    <p>Enter your name; the code is pre-filled if you came from a link.</p>
+    <label>Your name</label>
+    <input id="name" type="text" placeholder="Your name">
+    <label>Session code</label>
+    <input id="code" type="text">
+    <div style="margin-top:12px;">
+      <button id="go">Join</button>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.get('c')) document.getElementById('code').value = params.get('c').toUpperCase();
+
+    document.getElementById('go').addEventListener('click', async () => {
+      const code = (document.getElementById('code').value || '').trim().toUpperCase();
+      const name = document.getElementById('name').value || 'Guest';
+      const resp = await fetch('/api/join', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: code, playerName: name })
+      });
+      const data = await resp.json();
+      if (!resp.ok){ alert(data.error || 'Join failed'); return; }
+      location.href = 'game.html?c=' + encodeURIComponent(code) + '&name=' + encodeURIComponent(name) + '&p=' + encodeURIComponent(data.playerId);
+    });
+  </script>
+</body>
+</html>
