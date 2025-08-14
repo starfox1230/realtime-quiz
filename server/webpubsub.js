@@ -1,4 +1,10 @@
-import { WebPubSubSocketIOAdapter } from "@azure/web-pubsub-socket.io";
+import pkg from "@azure/web-pubsub-socket.io";
+const { WebPubSubSocketIOAdapter } = pkg;
+
+export function attachWebPubSub(io, connStr, hub = "quizhub") {
+  io.adapter(new WebPubSubSocketIOAdapter(connStr, { hub }));
+}
+
 
 export async function attachWebPubSubAdapter(io) {
   const connectionString = process.env.WEB_PUBSUB_CONNECTION_STRING;
