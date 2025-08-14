@@ -1,0 +1,20 @@
+{
+  "title": "Sample Quiz",
+  "settings": { "timePerQuestionSec": 20, "readDelaySec": 3 },
+  "questions": [
+    {
+      "prompt": "Which artery supplies the pterygopalatine fossa?",
+      "choices": ["Facial artery", "Maxillary artery", "Superficial temporal artery", "Occipital artery"],
+      "answerIndex": 1,
+      "explanation": "The maxillary artery (third part) supplies branches in the pterygopalatine fossa.",
+      "imageUrl": null
+    },
+    {
+      "prompt": "Which space is most dependent in a supine patient?",
+      "choices": ["Left subphrenic space", "Morrison's pouch", "Pelvic prevesical space", "Left paracolic gutter"],
+      "answerIndex": 1,
+      "explanation": "Morrison's pouch (hepatorenal recess) is most dependent when supine.",
+      "imageUrl": null
+    }
+  ]
+}
