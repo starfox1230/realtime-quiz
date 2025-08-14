@@ -18,7 +18,10 @@
         &nbsp;&nbsp;|&nbsp;&nbsp;
         <span id="p2Name">P2</span>: <span id="p2Score">0</span>
       </div>
-      <div class="timer"><span id="timer">--</span>s</div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="timer"><span id="timer">--</span>s</div>
+        <span id="connStatus" class="badge">connecting…</span>
+      </div>
     </div>
 
     <div id="lobby" class="lobby">
@@ -53,9 +56,28 @@
     const playerName = params.get('name') || (isHost ? 'Host' : 'Player');
     const playerId = params.get('p') || (isHost ? 'p1' : null);
 
+    // Guard: if sessionId missing, send user to join page
+    if (!sessionId) {
+      location.href = 'join.html';
+    }
+
     document.getElementById('sessionId').textContent = sessionId || '—';
 
-    const socket = io({ withCredentials: false });
+    // --- Socket.IO resilient init (good for Free plan) ---
+    const socket = io({
+      withCredentials: false,
+      transports: ["websocket", "polling"], // allow fallback if WS fails
+      upgrade: true,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 4000,
+      timeout: 10000 // connection timeout (ms)
+    });
+
+    const $ = (id) => document.getElementById(id);
+    const show = (el) => el.classList.remove('hidden');
+    const hide = (el) => el.classList.add('hidden');
 
     let settings = { timePerQuestionSec: 20, readDelaySec: 3 };
     let currentIndex = -1;
@@ -64,9 +86,14 @@
     let timerInterval = null;
     let timeLeft = 0;
 
-    function $(id){ return document.getElementById(id); }
-    function show(el){ el.classList.remove('hidden'); }
-    function hide(el){ el.classList.add('hidden'); }
+    // --- Connection status badge helpers ---
+    function setConnStatus(text, tone="") {
+      const el = $('connStatus');
+      el.textContent = text;
+      // quick tone styles
+      el.style.borderColor = tone === "ok" ? "#1e9e50" : tone === "warn" ? "#eab308" : tone === "bad" ? "#ef4444" : "#27324a";
+      el.style.color = tone === "ok" ? "#bbf7d0" : tone === "warn" ? "#fde68a" : tone === "bad" ? "#fecaca" : "#c7d2fe";
+    }
 
     function renderPlayers(state){
       const el = $('players');
@@ -80,14 +107,11 @@
         if (p.id === 'p2'){ $('p2Name').textContent = p.name; $('p2Score').textContent = p.score; }
       });
 
-      if (isHost){
-        $('hostControls').style.display = 'block';
-      } else {
-        $('hostControls').style.display = 'none';
-      }
+      $('hostControls').style.display = isHost ? 'block' : 'none';
     }
 
     async function joinRoom(){
+      // If the user came here directly (host route), ensure API join happened implicitly
       if (!playerId){
         const resp = await fetch('/api/join', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -104,11 +128,11 @@
 
     function startTimer(seconds){
       clearInterval(timerInterval);
-      timeLeft = seconds;
+      timeLeft = Math.max(0, Number(seconds)||0);
       $('timer').textContent = timeLeft;
       timerInterval = setInterval(() => {
-        timeLeft -= 1;
-        $('timer').textContent = Math.max(0, timeLeft);
+        timeLeft = Math.max(0, timeLeft - 1);
+        $('timer').textContent = timeLeft;
         if (timeLeft <= 0){
           clearInterval(timerInterval);
         }
@@ -153,6 +177,13 @@
       socket.emit('game:next', { room: sessionId });
     });
 
+    // --- Socket connection state UX ---
+    socket.on('connect', () => setConnStatus('connected', 'ok'));
+    socket.on('disconnect', () => setConnStatus('disconnected', 'bad'));
+    socket.io.on('reconnect_attempt', (n) => setConnStatus(`reconnecting (${n})…`, 'warn'));
+    socket.on('connect_error', () => setConnStatus('connect error — retrying…', 'warn'));
+
+    // --- Game events ---
     socket.on('room:state', (state) => {
       settings = state.settings || settings;
       renderPlayers(state);
@@ -169,7 +200,7 @@
     socket.on('answer:reveal', (payload) => {
       clearInterval(timerInterval);
       show($('nextBtn'));
-      const { correctIndex, perPlayer, runningTotals } = payload;
+      const { correctIndex, runningTotals } = payload;
 
       const nodes = Array.from(document.querySelectorAll('.choice'));
       nodes.forEach((n, idx) => {
@@ -202,6 +233,8 @@
       $('history').appendChild(h);
     });
 
+    // Kick things off
+    setConnStatus('connecting…');
     joinRoom();
   </script>
 </body>
