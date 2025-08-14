@@ -1,0 +1,208 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quiz Game</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div>
+        <span class="badge">Session</span>
+        <span id="sessionId" class="code"></span>
+      </div>
+      <div class="score">
+        <span id="p1Name">P1</span>: <span id="p1Score">0</span>
+        &nbsp;&nbsp;|&nbsp;&nbsp;
+        <span id="p2Name">P2</span>: <span id="p2Score">0</span>
+      </div>
+      <div class="timer"><span id="timer">--</span>s</div>
+    </div>
+
+    <div id="lobby" class="lobby">
+      <h2>Lobby</h2>
+      <div class="players" id="players"></div>
+      <div id="hostControls" style="margin-top:10px;">
+        <button id="startBtn">Start</button>
+      </div>
+    </div>
+
+    <div id="game" class="hidden">
+      <div id="prompt" class="qprompt"></div>
+      <div id="choices" class="choices"></div>
+      <div style="margin-top:12px;">
+        <button id="nextBtn" class="hidden">Continue</button>
+      </div>
+      <div id="reveal" style="margin-top:12px;"></div>
+    </div>
+
+    <div id="final" class="hidden">
+      <h2>Final Results</h2>
+      <div id="finalTotals"></div>
+      <div id="history"></div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const sessionId = (params.get('c')||'').toUpperCase();
+    const isHost = params.get('host') === '1';
+    const playerName = params.get('name') || (isHost ? 'Host' : 'Player');
+    const playerId = params.get('p') || (isHost ? 'p1' : null);
+
+    document.getElementById('sessionId').textContent = sessionId || '—';
+
+    const socket = io({ withCredentials: false });
+
+    let settings = { timePerQuestionSec: 20, readDelaySec: 3 };
+    let currentIndex = -1;
+    let locked = false;
+    let myChoice = null;
+    let timerInterval = null;
+    let timeLeft = 0;
+
+    function $(id){ return document.getElementById(id); }
+    function show(el){ el.classList.remove('hidden'); }
+    function hide(el){ el.classList.add('hidden'); }
+
+    function renderPlayers(state){
+      const el = $('players');
+      el.innerHTML = '';
+      (state.players||[]).forEach(p => {
+        const d = document.createElement('div');
+        d.className = 'player';
+        d.textContent = p.name + (p.online ? '' : ' (offline)');
+        el.appendChild(d);
+        if (p.id === 'p1'){ $('p1Name').textContent = p.name; $('p1Score').textContent = p.score; }
+        if (p.id === 'p2'){ $('p2Name').textContent = p.name; $('p2Score').textContent = p.score; }
+      });
+
+      if (isHost){
+        $('hostControls').style.display = 'block';
+      } else {
+        $('hostControls').style.display = 'none';
+      }
+    }
+
+    async function joinRoom(){
+      if (!playerId){
+        const resp = await fetch('/api/join', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, playerName })
+        });
+        const data = await resp.json();
+        if (!resp.ok){ alert(data.error || 'Join failed'); return; }
+        const newUrl = new URL(location.href);
+        newUrl.searchParams.set('p', data.playerId);
+        history.replaceState({}, '', newUrl.toString());
+      }
+      socket.emit('room:join', { room: sessionId, playerId: (new URL(location.href)).searchParams.get('p') || playerId, name: playerName });
+    }
+
+    function startTimer(seconds){
+      clearInterval(timerInterval);
+      timeLeft = seconds;
+      $('timer').textContent = timeLeft;
+      timerInterval = setInterval(() => {
+        timeLeft -= 1;
+        $('timer').textContent = Math.max(0, timeLeft);
+        if (timeLeft <= 0){
+          clearInterval(timerInterval);
+        }
+      }, 1000);
+    }
+
+    function renderQuestion(index, q){
+      currentIndex = index;
+      locked = false;
+      myChoice = null;
+      $('reveal').innerHTML = '';
+      $('choices').innerHTML = '';
+      $('prompt').textContent = q.prompt;
+      hide($('nextBtn'));
+
+      const delay = Number(settings.readDelaySec) || 0;
+      const timePer = Number(settings.timePerQuestionSec) || 20;
+
+      setTimeout(() => {
+        for (let i=0; i<q.choices.length; i++){
+          const c = document.createElement('div');
+          c.className = 'choice';
+          c.textContent = q.choices[i];
+          c.addEventListener('click', () => {
+            if (locked) return;
+            locked = true;
+            myChoice = i;
+            Array.from(document.querySelectorAll('.choice')).forEach((e) => e.classList.add('locked'));
+            socket.emit('answer:submit', { room: sessionId, index: currentIndex, playerId: (new URL(location.href)).searchParams.get('p') || playerId, answerIndex: i, timeLeftSec: timeLeft });
+          });
+          $('choices').appendChild(c);
+        }
+        startTimer(timePer);
+      }, delay * 1000);
+    }
+
+    $('startBtn').addEventListener('click', () => {
+      socket.emit('host:start', { room: sessionId });
+    });
+
+    $('nextBtn').addEventListener('click', () => {
+      socket.emit('game:next', { room: sessionId });
+    });
+
+    socket.on('room:state', (state) => {
+      settings = state.settings || settings;
+      renderPlayers(state);
+      if (state.status === 'active'){ hide($('lobby')); show($('game')); }
+      if (state.status === 'done'){ hide($('game')); hide($('lobby')); show($('final')); }
+    });
+
+    socket.on('question:show', ({ index, q, settings: s }) => {
+      settings = s || settings;
+      hide($('lobby')); show($('game'));
+      renderQuestion(index, q);
+    });
+
+    socket.on('answer:reveal', (payload) => {
+      clearInterval(timerInterval);
+      show($('nextBtn'));
+      const { correctIndex, perPlayer, runningTotals } = payload;
+
+      const nodes = Array.from(document.querySelectorAll('.choice'));
+      nodes.forEach((n, idx) => {
+        if (idx === correctIndex) n.classList.add('correct');
+        if (myChoice !== null && idx === myChoice && idx !== correctIndex) n.classList.add('incorrect');
+      });
+
+      $('p1Score').textContent = runningTotals.p1;
+      $('p2Score').textContent = runningTotals.p2;
+
+      const r = document.createElement('div');
+      r.innerHTML = '<div class="badge">Correct answer: ' + (correctIndex+1) + '</div>';
+      $('reveal').appendChild(r);
+    });
+
+    socket.on('pause:state', ({ paused }) => {
+      $('timer').textContent = paused ? '⏸' : $('timer').textContent;
+    });
+
+    socket.on('game:final', ({ totals, history }) => {
+      hide($('game')); hide($('lobby')); show($('final'));
+      $('finalTotals').innerHTML = '<p><strong>Totals</strong>: ' + totals.p1 + ' — ' + totals.p2 + '</p>';
+      const h = document.createElement('div');
+      history.forEach(item => {
+        const line = document.createElement('div');
+        line.className = 'card';
+        line.textContent = `Q${item.index+1}: P1→${item.p1Choice+1}, P2→${item.p2Choice+1}, Correct→${item.correctIndex+1}, +${item.p1Points}/${item.p2Points}`;
+        h.appendChild(line);
+      });
+      $('history').appendChild(h);
+    });
+
+    joinRoom();
+  </script>
+</body>
+</html>
