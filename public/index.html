@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Real-Time Quiz</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Real-Time Quiz</h1>
+    <p>Host a quiz or join with a code.</p>
+
+    <div class="row">
+      <div class="card" style="flex:1;">
+        <h2>Host Quiz</h2>
+        <label>Your name</label>
+        <input id="hostName" type="text" placeholder="Host name">
+        <label>Upload quiz JSON</label>
+        <input id="quizFile" type="file" accept="application/json">
+        <div style="margin-top:12px;">
+          <button id="createBtn">Create Session</button>
+          <span id="createMsg" class="badge" style="margin-left:8px;"></span>
+        </div>
+        <div id="hostResult" class="lobby hidden" style="margin-top:12px;"></div>
+      </div>
+
+      <div class="card" style="flex:1;">
+        <h2>Join Quiz</h2>
+        <label>Your name</label>
+        <input id="guestName" type="text" placeholder="Your name">
+        <label>Session code</label>
+        <input id="joinCode" type="text" placeholder="ABC123">
+        <div style="margin-top:12px;">
+          <button id="joinBtn">Join</button>
+        </div>
+      </div>
+    </div>
+
+    <hr>
+    <p>Try the included <span class="code">sample-quiz.json</span> to get started quickly.</p>
+  </div>
+
+  <script>
+    async function readJsonFile(file){
+      const text = await file.text();
+      return JSON.parse(text);
+    }
+
+    document.getElementById('createBtn').addEventListener('click', async () => {
+      const file = document.getElementById('quizFile').files[0];
+      const name = document.getElementById('hostName').value || 'Host';
+      if (!file){ alert('Please choose a quiz JSON file.'); return; }
+      try {
+        const quiz = await readJsonFile(file);
+        const resp = await fetch('/api/sessions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quiz, hostName: name })
+        });
+        const data = await resp.json();
+        if (!resp.ok){ throw new Error(data.error || 'Failed'); }
+        const el = document.getElementById('hostResult');
+        el.classList.remove('hidden');
+        el.innerHTML = `
+          <div><strong>Session Code:</strong> <span class="code">${data.sessionId}</span></div>
+          <div style="margin-top:8px;"><button onclick="location.href='game.html?c=${data.sessionId}&host=1&name='+encodeURIComponent('${name}')">Go to Lobby</button></div>
+          <div style="margin-top:8px;">Share this link: <span class="code">${data.joinUrl}</span></div>
+        `;
+        document.getElementById('createMsg').textContent = 'Created!';
+      } catch (e){
+        alert('Error: ' + e.message);
+      }
+    });
+
+    document.getElementById('joinBtn').addEventListener('click', async () => {
+      const code = (document.getElementById('joinCode').value || '').trim().toUpperCase();
+      const name = document.getElementById('guestName').value || 'Guest';
+      if (!code){ alert('Enter a code'); return; }
+      const resp = await fetch('/api/join', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: code, playerName: name })
+      });
+      const data = await resp.json();
+      if (!resp.ok){ alert(data.error || 'Join failed'); return; }
+      location.href = 'game.html?c=' + encodeURIComponent(code) + '&name=' + encodeURIComponent(name) + '&p=' + encodeURIComponent(data.playerId);
+    });
+  </script>
+</body>
+</html>
