@@ -1,4 +1,4 @@
-# realtime-quiz# Real-Time Collaborative Quiz App (Azure Web App + Azure Web PubSub)
+# Real-Time Collaborative Quiz App (Azure Web App + Azure Web PubSub)
 
 This is a starter repo for a two-player, real-time quiz game. It uses:
 - **Node.js + Express** for the API and static hosting
@@ -6,6 +6,10 @@ This is a starter repo for a two-player, real-time quiz game. It uses:
 - **(Optional) Azure Blob Storage** to persist uploaded quizzes by sessionId
 
 > If you specifically need **Azure SignalR Service**, consider a .NET server or an Azure Functions (JavaScript) hub. For Node servers, **Azure Web PubSub** is the most straightforward choice and functionally equivalent for this use case.
+
+## Requirements
+
+- Node.js 18 or newer
 
 ## Quick Start (Local)
 1. `npm install`
