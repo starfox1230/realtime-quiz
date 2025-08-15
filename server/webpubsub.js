@@ -1,10 +1,9 @@
-import pkg from "@azure/web-pubsub-socket.io";
-const { WebPubSubSocketIOAdapter } = pkg;
+// server/webpubsub.js
+// Works with both "factory function" and "class" styles of the adapter.
 
-export function attachWebPubSub(io, connStr, hub = "quizhub") {
-  io.adapter(new WebPubSubSocketIOAdapter(connStr, { hub }));
+function isClass(fn) {
+  return typeof fn === "function" && /^class\s/.test(Function.prototype.toString.call(fn));
 }
-
 
 export async function attachWebPubSubAdapter(io) {
   const connectionString = process.env.WEB_PUBSUB_CONNECTION_STRING;
@@ -12,11 +11,34 @@ export async function attachWebPubSubAdapter(io) {
     console.warn("WEB_PUBSUB_CONNECTION_STRING not set; using default Socket.IO adapter");
     return;
   }
+
   try {
-    const adapter = new WebPubSubSocketIOAdapter(connectionString, { hub: "quiz" });
+    const mod = await import("@azure/web-pubsub-socket.io");
+
+    // Try the common export names in order of likelihood
+    const candidate =
+      mod.WebPubSubSocketIOAdapter ||
+      mod.WebPubSubAdapter ||
+      mod.createAdapter ||
+      mod.default;
+
+    if (!candidate) {
+      throw new Error(
+        "Could not find an adapter export in @azure/web-pubsub-socket.io " +
+        "(looked for WebPubSubSocketIOAdapter/WebPubSubAdapter/createAdapter/default)."
+      );
+    }
+
+    const opts = { hub: process.env.WEB_PUBSUB_HUB || "quiz" };
+    const adapter = isClass(candidate)
+      ? new candidate(connectionString, opts)  // class-style export
+      : candidate(connectionString, opts);     // factory-style export
+
     io.adapter(adapter);
+    console.log("Azure Web PubSub adapter attached.");
   } catch (err) {
     console.error("Failed to attach Web PubSub adapter", err);
-    throw err;
+    console.warn("Continuing with default in-memory Socket.IO adapter.");
+    // Fall back silently so the site still boots
   }
 }
