@@ -1,44 +1,31 @@
-// server/webpubsub.js
-// Works with both "factory function" and "class" styles of the adapter.
+// server/webpubsub.js (ESM)
 
-function isClass(fn) {
-  return typeof fn === "function" && /^class\s/.test(Function.prototype.toString.call(fn));
-}
+import { useAzureSocketIO } from "@azure/web-pubsub-socket.io";
 
-export async function attachWebPubSubAdapter(io) {
+/**
+ * Try to attach Azure Web PubSub for Socket.IO.
+ * If no connection string is set or anything fails, we log and keep going
+ * with the default in-memory Socket.IO transport.
+ */
+export async function attachWebPubSubAdapter(io, hub = "quiz") {
   const connectionString = process.env.WEB_PUBSUB_CONNECTION_STRING;
   if (!connectionString) {
-    console.warn("WEB_PUBSUB_CONNECTION_STRING not set; using default Socket.IO adapter");
+    console.warn(
+      "WEB_PUBSUB_CONNECTION_STRING not set; continuing with default Socket.IO."
+    );
     return;
   }
 
   try {
-    const mod = await import("@azure/web-pubsub-socket.io");
-
-    // Try the common export names in order of likelihood
-    const candidate =
-      mod.WebPubSubSocketIOAdapter ||
-      mod.WebPubSubAdapter ||
-      mod.createAdapter ||
-      mod.default;
-
-    if (!candidate) {
-      throw new Error(
-        "Could not find an adapter export in @azure/web-pubsub-socket.io " +
-        "(looked for WebPubSubSocketIOAdapter/WebPubSubAdapter/createAdapter/default)."
-      );
-    }
-
-    const opts = { hub: process.env.WEB_PUBSUB_HUB || "quiz" };
-    const adapter = isClass(candidate)
-      ? new candidate(connectionString, opts)  // class-style export
-      : candidate(connectionString, opts);     // factory-style export
-
-    io.adapter(adapter);
-    console.log("Azure Web PubSub adapter attached.");
+    await useAzureSocketIO(io, {
+      hub,
+      connectionString,
+      // optional: set to true to see detailed SDK logs in console
+      // logging: true,
+    });
+    console.log("Azure Web PubSub for Socket.IO attached (hub:", hub, ").");
   } catch (err) {
-    console.error("Failed to attach Web PubSub adapter", err);
+    console.error("Failed to attach Azure Web PubSub adapter:", err);
     console.warn("Continuing with default in-memory Socket.IO adapter.");
-    // Fall back silently so the site still boots
   }
 }
