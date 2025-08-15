@@ -11,26 +11,29 @@ import { attachWebPubSubAdapter } from "./webpubsub.js";
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: process.env.CORS_ORIGIN || "*", methods: ["GET","POST"] }
+  cors: { origin: process.env.CORS_ORIGIN || "*", methods: ["GET", "POST"] }
 });
-
-await attachWebPubSubAdapter(io);
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(bodyParser.json({ limit: "2mb" }));
 app.use(express.static("public"));
+
+// Basic route for Azure health check
+app.get("/", (req, res) => {
+  res.send("Realtime Quiz App is running");
+});
 
 const PORT = process.env.PORT || 8080;
 
 // In-memory session state for MVP
 const sessions = new Map();
 
-function createSessionState(sessionId, quiz){
+function createSessionState(sessionId, quiz) {
   return {
     status: "lobby",
     createdAt: Date.now(),
     currentIndex: -1,
-    players: { p1: null, p2: null }, // { id, name, socketId, score }
+    players: { p1: null, p2: null },
     quizMeta: {
       title: quiz.title || "Quiz",
       settings: {
@@ -39,19 +42,26 @@ function createSessionState(sessionId, quiz){
       }
     },
     history: [],
-    answers: { p1: null, p2: null } // per-question temp answers
+    answers: { p1: null, p2: null }
   };
 }
 
-function getRoomPlayers(state){
+function getRoomPlayers(state) {
   const players = [];
-  for (const k of ["p1","p2"]){
-    if (state.players[k]) players.push({ id:k, name: state.players[k].name, score: state.players[k].score || 0, online: !!state.players[k].socketId });
+  for (const k of ["p1", "p2"]) {
+    if (state.players[k]) {
+      players.push({
+        id: k,
+        name: state.players[k].name,
+        score: state.players[k].score || 0,
+        online: !!state.players[k].socketId
+      });
+    }
   }
   return players;
 }
 
-function broadcastRoomState(sessionId){
+function broadcastRoomState(sessionId) {
   const state = sessions.get(sessionId);
   if (!state) return;
   io.to(sessionId).emit("room:state", {
@@ -62,7 +72,7 @@ function broadcastRoomState(sessionId){
   });
 }
 
-function scrubQuestionForClient(q){
+function scrubQuestionForClient(q) {
   const { answerIndex, ...rest } = q;
   return rest;
 }
@@ -73,14 +83,14 @@ app.post("/api/sessions", async (req, res) => {
     const ok = validateQuiz(quiz);
     if (!ok.valid) return res.status(400).json({ error: ok.error });
 
-    const sessionId = crypto.randomBytes(3).toString("hex").toUpperCase(); // 6 chars
+    const sessionId = crypto.randomBytes(3).toString("hex").toUpperCase();
     await saveQuizJson(sessionId, quiz);
     const state = createSessionState(sessionId, quiz);
     sessions.set(sessionId, state);
 
     const joinUrl = `${req.protocol}://${req.get("host")}/join.html?c=${sessionId}`;
     res.status(201).json({ sessionId, joinUrl, settings: state.quizMeta.settings });
-  } catch (e){
+  } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Failed to create session" });
   }
@@ -98,10 +108,10 @@ app.post("/api/join", async (req, res) => {
     else if (!state.players.p2) slot = "p2";
     else return res.status(409).json({ error: "Session full" });
 
-    const name = (playerName || (slot === "p1" ? "Player 1" : "Player 2")).slice(0,24);
+    const name = (playerName || (slot === "p1" ? "Player 1" : "Player 2")).slice(0, 24);
     state.players[slot] = { id: slot, name, socketId: null, score: 0 };
     res.json({ room: sessionId, playerId: slot, name });
-  } catch (e){
+  } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Join failed" });
   }
@@ -111,11 +121,15 @@ io.on("connection", (socket) => {
   socket.on("room:join", async ({ room, playerId, name }) => {
     if (!sessions.has(room)) return socket.emit("error", { error: "Session not found" });
     const state = sessions.get(room);
-    if (!["p1","p2"].includes(playerId)) return socket.emit("error", { error: "Invalid playerId" });
+    if (!["p1", "p2"].includes(playerId)) return socket.emit("error", { error: "Invalid playerId" });
 
-    if (!state.players[playerId]){
-      // Late-join without /api/join
-      state.players[playerId] = { id: playerId, name: name || (playerId==="p1"?"Player 1":"Player 2"), socketId: null, score: 0 };
+    if (!state.players[playerId]) {
+      state.players[playerId] = {
+        id: playerId,
+        name: name || (playerId === "p1" ? "Player 1" : "Player 2"),
+        socketId: null,
+        score: 0
+      };
     } else {
       if (name) state.players[playerId].name = name;
     }
@@ -142,12 +156,15 @@ io.on("connection", (socket) => {
   socket.on("answer:submit", async ({ room, index, playerId, answerIndex, timeLeftSec }) => {
     const state = sessions.get(room);
     if (!state || state.currentIndex !== index) return;
-    if (!["p1","p2"].includes(playerId)) return;
+    if (!["p1", "p2"].includes(playerId)) return;
 
-    state.answers[playerId] = { answerIndex, timeLeftSec: Math.max(0, Math.min(999, Number(timeLeftSec)||0)) };
+    state.answers[playerId] = {
+      answerIndex,
+      timeLeftSec: Math.max(0, Math.min(999, Number(timeLeftSec) || 0))
+    };
 
     const bothAnswered = state.answers.p1 && state.answers.p2;
-    if (bothAnswered){
+    if (bothAnswered) {
       const quiz = await getQuizJson(room);
       const correctIndex = quiz.questions[index].answerIndex;
 
@@ -157,7 +174,7 @@ io.on("connection", (socket) => {
       const p1Correct = p1.answerIndex === correctIndex;
       const p2Correct = p2.answerIndex === correctIndex;
 
-      const pts = (ok, t) => ok ? Math.max(0, Math.floor(t||0)) : 0;
+      const pts = (ok, t) => (ok ? Math.max(0, Math.floor(t || 0)) : 0);
 
       if (state.players.p1) state.players.p1.score += pts(p1Correct, p1.timeLeftSec);
       if (state.players.p2) state.players.p2.score += pts(p2Correct, p2.timeLeftSec);
@@ -184,7 +201,6 @@ io.on("connection", (socket) => {
         p2Points: pts(p2Correct, p2.timeLeftSec)
       });
 
-      // reset per-question answers for next round
       state.answers = { p1: null, p2: null };
 
       io.to(room).emit("answer:reveal", revealPayload);
@@ -196,7 +212,7 @@ io.on("connection", (socket) => {
     if (!state) return;
     const quiz = await getQuizJson(room);
     state.currentIndex += 1;
-    if (state.currentIndex >= quiz.questions.length){
+    if (state.currentIndex >= quiz.questions.length) {
       state.status = "done";
       io.to(room).emit("game:final", {
         totals: {
@@ -221,9 +237,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    for (const [sid, state] of sessions){
-      for (const k of ["p1","p2"]){
-        if (state.players[k]?.socketId === socket.id){
+    for (const [sid, state] of sessions) {
+      for (const k of ["p1", "p2"]) {
+        if (state.players[k]?.socketId === socket.id) {
           state.players[k].socketId = null;
           broadcastRoomState(sid);
         }
@@ -232,6 +248,15 @@ io.on("connection", (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Server listening on :${PORT}`);
-});
+// Start the server inside async init
+(async () => {
+  try {
+    await attachWebPubSubAdapter(io);
+    httpServer.listen(PORT, () => {
+      console.log(`Server listening on :${PORT}`);
+    });
+  } catch (err) {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  }
+})();
